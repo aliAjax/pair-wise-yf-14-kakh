@@ -1,126 +1,138 @@
+import { useEffect, useState } from "react";
 import "./styles.css";
+import { useDeskStore } from "./state/useDeskStore";
+import type { StatusFilter } from "./data/types";
+import { FilterBar } from "./components/FilterBar";
+import { CueCard } from "./components/CueCard";
+import { OrphanZone } from "./components/OrphanZone";
+import { AddCueForm } from "./components/AddCueForm";
 
-const project = {
-  "sourceNo": 2,
-  "id": "hxyfront-62002",
-  "port": 62002,
-  "title": "剧场灯光Cue表管理",
-  "domain": "剧场灯光",
-  "prompt": "做一个给剧场灯光师使用的灯位与Cue表管理前端项目，可以维护演出名称、灯具编号、通道号、色片、焦点位置、亮度预设和Cue触发顺序。页面需要有舞台平面灯位图、Cue列表、当前场景预览、灯具筛选和演出版本备注，适合排练期间快速调整。",
-  "palette": [
-    "#7c3aed",
-    "#f59e0b",
-    "#06b6d4"
-  ],
-  "metrics": [
-    "灯具数量",
-    "Cue数量",
-    "当前场景",
-    "待确认焦点"
-  ],
-  "filters": [
-    "面光",
-    "侧光",
-    "逆光",
-    "效果光"
-  ],
-  "fields": [
-    "演出名称",
-    "灯具编号",
-    "通道号",
-    "色片",
-    "焦点位置",
-    "亮度预设"
-  ],
-  "records": [
-    [
-      "Cue 12",
-      "冷蓝侧光",
-      "CH 021-028，亮度65%",
-      "二幕开场"
-    ],
-    [
-      "Cue 18",
-      "追光入场",
-      "FOH-03，焦点门口",
-      "需演员走位确认"
-    ],
-    [
-      "Cue 24",
-      "暖色谢幕",
-      "全台面光80%",
-      "版本B"
-    ]
-  ]
-};
+const AUTHOR_KEY = "rehearsal-annotation-desk:lastAuthor";
 
 function App() {
+  const { state, actions, views } = useDeskStore();
+  const [filter, setFilter] = useState<StatusFilter>("all");
+  const [lastAuthor, setLastAuthor] = useState<string>(() => {
+    try {
+      return localStorage.getItem(AUTHOR_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (lastAuthor) localStorage.setItem(AUTHOR_KEY, lastAuthor);
+    } catch {
+      // ignore
+    }
+  }, [lastAuthor]);
+
+  const totalAnnotations = state.annotations.length;
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>排练批注台 · Rehearsal Annotation Desk</p>
+        <h1>
+          <input
+            className="show-name-input"
+            value={state.showName}
+            onChange={(e) => actions.renameShow(e.target.value)}
+            aria-label="演出 / 排练名称"
+          />
+        </h1>
+        <span>
+          灯光师在 Cue 上留下的临时批注都登记在此：记录批注内容、提出人与处理状态；
+          Cue 调序批注跟随原 Cue，Cue 移走后批注进入失联区，可重新挂到别的 Cue。数据自动保存在本机，重开继续处理。
+        </span>
+        <div className="hero__footer">
+          <span className="save-hint">✓ 已自动保存到本机</span>
+          <button
+            className="ghost-btn"
+            onClick={() => {
+              if (window.confirm("恢复为示例数据？当前所有批注与 Cue 都会被清空。")) {
+                actions.resetToSeed();
+              }
+            }}
+          >
+            重置为示例
+          </button>
+        </div>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[86, 14, 7, 32][index] ?? 12}</strong>
-          </article>
-        ))}
+        <article>
+          <small>Cue 数量</small>
+          <strong>{state.cues.length}</strong>
+        </article>
+        <article>
+          <small>批注总数</small>
+          <strong>{totalAnnotations}</strong>
+        </article>
+        <article className="metrics--pending">
+          <small>待处理</small>
+          <strong>{views.counts.pending}</strong>
+        </article>
+        <article>
+          <small>失联区</small>
+          <strong>{views.orphans.length}</strong>
+        </article>
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}筛选</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <FilterBar
+        filter={filter}
+        onChange={setFilter}
+        counts={views.counts}
+        total={totalAnnotations}
+      />
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存草稿</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
+      <section className="cue-list">
+        {views.cueViews.length === 0 && (
+          <section className="panel">
+            <p className="empty-line">Cue 表为空，先在下方新增一个 Cue。</p>
+          </section>
+        )}
+        {views.cueViews.map((view, index) => {
+          const shown = views.filter(view.annotations, filter);
+          // 非“全部”筛选时，没有匹配批注的 Cue 折叠隐藏，复排更聚焦
+          if (filter !== "all" && shown.length === 0) return null;
+          return (
+            <section key={view.cue.id} className="panel">
+              <CueCard
+                cue={view.cue}
+                index={index}
+                total={state.cues.length}
+                annotations={shown}
+                filter={filter}
+                onMove={(direction) => actions.moveCue(view.cue.id, direction)}
+                onRemoveCue={() => actions.removeCue(view.cue.id)}
+                onAddAnnotation={(content, author) =>
+                  actions.addAnnotation({ cueId: view.cue.id, content, author })
+                }
+                onStatusChange={actions.setAnnotationStatus}
+                onContentChange={actions.updateAnnotationContent}
+                onRemoveAnnotation={actions.removeAnnotation}
+                lastAuthor={lastAuthor}
+                onAuthorChange={setLastAuthor}
+              />
+            </section>
+          );
+        })}
       </section>
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>历史记录</p>
-            <h2>近期工作台</h2>
-          </div>
-          <button>导出摘要</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      <OrphanZone
+        orphans={views.filter(views.orphans, filter)}
+        cueViews={views.cueViews}
+        filter={filter}
+        onReattach={actions.reattach}
+        onReattachGroup={actions.reattachGroup}
+        onStatusChange={actions.setAnnotationStatus}
+        onContentChange={actions.updateAnnotationContent}
+        onRemoveAnnotation={actions.removeAnnotation}
+      />
+
+      <AddCueForm onAdd={actions.addCue} />
     </main>
   );
 }
